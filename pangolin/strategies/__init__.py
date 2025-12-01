@@ -7,8 +7,9 @@ import importlib
 # load strategy modules from pangolin/strategies
 class GetStrategy:
     def __init__(self):
-        print('*** GetStrategy Class ***')
+        pass
 
+    def run(self):
         # collect all strategy files ending with '.py'
         files = list(Path("pangolin/strategies").glob("*.py"))
 
