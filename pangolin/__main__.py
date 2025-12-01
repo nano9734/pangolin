@@ -1,9 +1,7 @@
 from . import Config
-from . import Database
 from . import APIManager
 from . import StreamManager
 
-config = Config()
-database = Database()
+config = Config(file_name='config.ini')
 api_manager = APIManager()
-stream_manager = StreamManager()
+stream_manager = StreamManager(config, database_file_name='data.db')
