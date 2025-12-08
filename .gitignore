@@ -7,4 +7,4 @@ venv/
 # miscellaneous
 data/
 pangolin.db
-config.ini
+pangolin.ini
