@@ -23,12 +23,18 @@ class Config:
         config = configparser.ConfigParser()
         config.read(self.CONFIG_FILE_NAME)
 
+        # check if the config is valid
         self.check_config_validity(config)
+
+        # generate instance variables
+        for config_allowed_exchange_name in self.CONFIG_ALLOWED_EXCHANGE_NAMES:
+            for config_allowed_key in config[config_allowed_exchange_name]:
+                config_allowed_key_value = config[config_allowed_exchange_name][config_allowed_key]
+                setattr(self, config_allowed_exchange_name.lower() + '_' + config_allowed_key, config_allowed_key_value)
 
     def check_config_validity(self, config):
         self.validated_class_names = []
         self.validated_exchange_names = []
-
         for section in config.sections():
             if section in self.CONFIG_ALLOWED_CLASS_NAMES and section not in self.validated_class_names:
                 self.validated_class_names.append(section)
