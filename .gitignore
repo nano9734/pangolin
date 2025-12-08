@@ -1,4 +1,10 @@
-__pycache__
+# python cache
+__pycache__/
+
+# virtual environment
+venv/
+
+# miscellaneous
+data/
+pangolin.db
 config.ini
-/data
-/.venv
