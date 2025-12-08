@@ -37,4 +37,4 @@ class Config:
             else:
                 raise ValueError(f"Invalid section name: {section}")
 
-        print('[INFO] All sections are checked and ready to go!')
+        print('[INFO] All sections are checked and ready to go!\n')
