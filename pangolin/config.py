@@ -2,34 +2,39 @@ import configparser
 import os
 
 class Config:
-    def __init__(self, file_name):
-        # check if the configuration exists
-        if not os.path.exists(file_name):
-            raise FileNotFoundError(f"Configuration file not found: '{file_path}'")
+    CONFIG_FILE_NAME = 'pangolin.ini'
+    CONFIG_ALLOWED_CLASS_NAMES = ['Config', 'Database', 'APIManager','StreamManager']
+    CONFIG_ALLOWED_EXCHANGE_NAMES = ['Binance']
+    CONFIG_ALLOWED_VALUE_NAMES = []
+
+    def __init__(self):
+        print('*** Config ***')
+
+        # check if the configuration file exists
+        if not os.path.exists(self.CONFIG_FILE_NAME):
+            raise FileNotFoundError(f"Configuration file not found: '{self.CONFIG_FILE_NAME}'")
+        else:
+            print(f"[INFO] Pangolin found configuration file: '{self.CONFIG_FILE_NAME}'")
+
+        # prepare to read configuration file
+        print(f'[INFO] Reading configuration from \'{self.CONFIG_FILE_NAME}\'...')
 
         # create a ConfigParser instance
         config = configparser.ConfigParser()
-        config.read(file_name)
+        config.read(self.CONFIG_FILE_NAME)
 
-        # allowed keys in [DEFAULT]
-        self.allowed_config_keys = ['allowed_class_names', 'allowed_value_names']
+        self.check_config_validity(config)
 
-        # parse the [DEFAULT] section for each allowed key
-        for allowed_config_key in self.allowed_config_keys:
-            allowed_config_value = config['DEFAULT'][allowed_config_key]
-            setattr(self, allowed_config_key, [])
-            if ',' in allowed_config_value:
-                allowed_config_values = allowed_config_value.lower().split(',')
-                for value in allowed_config_values:
-                    getattr(self, allowed_config_key).append(value.strip())
+    def check_config_validity(self, config):
+        self.validated_class_names = []
+        self.validated_exchange_names = []
+
+        for section in config.sections():
+            if section in self.CONFIG_ALLOWED_CLASS_NAMES and section not in self.validated_class_names:
+                self.validated_class_names.append(section)
+            elif section in self.CONFIG_ALLOWED_EXCHANGE_NAMES and section not in self.validated_exchange_names:
+                self.validated_exchange_names.append(section)
             else:
-                getattr(self, allowed_config_key).append(allowed_config_value.strip())
+                raise ValueError(f"Invalid section name: {section}")
 
-        # add allowed config values as object attributes
-        for allowed_class_name in self.allowed_class_names:
-            for config_section in config.sections():
-                if allowed_class_name == config_section:
-                    for config_key in config[allowed_class_name]:
-                        if config_key not in self.allowed_config_keys:
-                            config_value = config[allowed_class_name][config_key]
-                            setattr(self, allowed_class_name + '_' + config_key, config_value)
+        print('[INFO] All sections are checked and ready to go!')
