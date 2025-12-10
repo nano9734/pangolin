@@ -28,12 +28,14 @@ class Config:
         # validate the sections in the given config.
         self.validate_config_sections(config)
 
+        print('[INFO] All sections are checked and ready to go!\n')
+
         # generate instance variables
         for config_allowed_exchange_name in self.CONFIG_ALLOWED_EXCHANGE_NAMES:
             for config_allowed_key in config[config_allowed_exchange_name]:
                 config_allowed_key_value = config[config_allowed_exchange_name][config_allowed_key]
-                if self.is_allowed_config_key(config_allowed_key_value) == True:
-                    raise ValueError('[ERROR] This configuration key is not allowed.')
+                if self.is_allowed_config_key(config_allowed_key) == False:
+                    raise ValueError(f'[ERROR] This configuration key is not allowed: {config_allowed_key}')
                 else:
                     setattr(self, config_allowed_exchange_name.lower() + '_' + config_allowed_key, config_allowed_key_value)
 
@@ -47,8 +49,6 @@ class Config:
                 self.validated_exchange_names.append(section)
             else:
                 raise ValueError(f"Invalid section name: {section}")
-
-        print('[INFO] All sections are checked and ready to go!\n')
 
     def is_allowed_config_key(self, config_key):
         if config_key in self.CONFIG_ALLOWED_CONFIG_KEYS:
