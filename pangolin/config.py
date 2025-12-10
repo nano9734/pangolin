@@ -3,9 +3,11 @@ import os
 
 class Config:
     CONFIG_FILE_NAME = 'pangolin.ini'
-    CONFIG_ALLOWED_CLASS_NAMES = ['Config', 'Database', 'APIManager','StreamManager']
+
+    # allowed names to prevent text input errors
+    CONFIG_ALLOWED_CLASS_NAMES = ['Config', 'Database', 'APIManager', 'StreamManager']
     CONFIG_ALLOWED_EXCHANGE_NAMES = ['Binance']
-    CONFIG_ALLOWED_VALUE_NAMES = []
+    CONFIG_ALLOWED_CONFIG_KEYS = ['supported_coin_list']
 
     def __init__(self):
         print('*** Config ***')
@@ -23,16 +25,19 @@ class Config:
         config = configparser.ConfigParser()
         config.read(self.CONFIG_FILE_NAME)
 
-        # check if the config is valid
-        self.check_config_validity(config)
+        # validate the sections in the given config.
+        self.validate_config_sections(config)
 
         # generate instance variables
         for config_allowed_exchange_name in self.CONFIG_ALLOWED_EXCHANGE_NAMES:
             for config_allowed_key in config[config_allowed_exchange_name]:
                 config_allowed_key_value = config[config_allowed_exchange_name][config_allowed_key]
-                setattr(self, config_allowed_exchange_name.lower() + '_' + config_allowed_key, config_allowed_key_value)
+                if self.is_allowed_config_key(config_allowed_key_value) == True:
+                    raise ValueError('[ERROR] This configuration key is not allowed.')
+                else:
+                    setattr(self, config_allowed_exchange_name.lower() + '_' + config_allowed_key, config_allowed_key_value)
 
-    def check_config_validity(self, config):
+    def validate_config_sections(self, config):
         self.validated_class_names = []
         self.validated_exchange_names = []
         for section in config.sections():
@@ -44,3 +49,9 @@ class Config:
                 raise ValueError(f"Invalid section name: {section}")
 
         print('[INFO] All sections are checked and ready to go!\n')
+
+    def is_allowed_config_key(self, config_key):
+        if config_key in self.CONFIG_ALLOWED_CONFIG_KEYS:
+            return True
+        else:
+            return False
