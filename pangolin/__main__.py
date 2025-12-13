@@ -8,7 +8,7 @@ def main():
     config = Config()
     database = Database(config)
     api_manager = APIManager()
-    stream_manager = StreamManager(config)
+    stream_manager = StreamManager(config, database)
 
 # execute only run as a script
 if __name__ == '__main__':
