@@ -39,12 +39,12 @@ class Config:
             FileNotFoundError: If allow_missing is False and the file does not exist.
         """
         if not os.path.exists(file_path):
-            if allow_missing is False:
+            if not allow_missing:
                 raise FileNotFoundError(
-                    f'Configuration file not found: "{self._CONFIG_FILE_NAME}"'
+                    f'Configuration file not found: "{file_path}"'
                 )
 
         config = configparser.ConfigParser()
-        config.read(file_path)
+        config.read(file_path, encoding='utf-8')
 
         return config
