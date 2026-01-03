@@ -25,7 +25,14 @@ import sys
 class Config:
     CONFIG_FILE_NAME = 'pangolin.ini'
 
-    def load(self, file_path: str, allow_missing: bool) -> configparser.ConfigParser:
+    def __init__(self):
+        print('*** Config ***')
+
+    def load(
+        self,
+        file_path: str,
+        allow_missing: bool
+    ) -> configparser.ConfigParser:
         """ Loads a config file from the given file path.
 
         Args:
@@ -44,7 +51,20 @@ class Config:
                     f'Configuration file not found: "{file_path}"'
                 )
 
+        # initialize ConfigParser
         config = configparser.ConfigParser()
-        config.read(file_path, encoding='utf-8')
 
+        # read Pangolin settings from config file
+        config.read(
+            file_path,
+            encoding='utf-8',
+        )
+
+        # print messeage
+        print('[INFO] Pangolin configuration loaded successfully and is ready for use.')
+
+        # add a line break for console readability
+        print()
+
+        # return the loaded configuration
         return config
