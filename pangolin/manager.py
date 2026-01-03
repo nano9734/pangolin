@@ -34,7 +34,7 @@ from contextlib import closing
 from .strategies import GetStrategy
 
 class StreamManager:
-    # database_file_path = pangolin/pangolin.db
+    # file_path = pangolin/pangolin.db
     DATABASE_FILE_NAME = 'pangolin.db'
 
     def __init__(
@@ -45,15 +45,18 @@ class StreamManager:
         """ initializes the instance for connecting websocket stream.
 
         Args:
-            loaded_config:
-            wss_url:
+            loaded_config: Configuration section for the exchange such as [Binance].
+            wss_url: WebSocket stream URL used to connect to the exchange.
         """
 
-        # create an instance of GetStrategy()
-        self.get_strategy = GetStrategy()
+        # mark StreamManager startup
+        print('*** StreamManager ***')
 
         # create an instance of Config()
         self.loaded_config = loaded_config
+
+        # get config
+        self.tumbling_window_seconds = int(self.loaded_config['tumbling_window_seconds'])
 
         # wss_url is created from UrlFactory()
         self.wss_url = wss_url
@@ -69,6 +72,15 @@ class StreamManager:
         self.cumulative_price: float = 0.0
         self.cumulative_quantity: float = 0.0
 
+        # print messeage
+        print('[INFO] StreamManager initialized successfully.')
+
+        # add a line break for console readability
+        print()
+
+        # create an instance of GetStrategy()
+        self.get_strategy = GetStrategy()
+
     def run(self):
         with closing(
             create_connection(
@@ -77,13 +89,15 @@ class StreamManager:
         ) as conn:
             try:
                 if os.path.exists(self.DATABASE_FILE_NAME):
-                    print(f'{self.DATABASE_FILE_NAME} exists')
+                    print(f'[INFO] {self.DATABASE_FILE_NAME} database file exists.')
                     os.remove(self.DATABASE_FILE_NAME)
 
                     if not os.path.exists(self.DATABASE_FILE_NAME):
-                        print(f'{self.DATABASE_FILE_NAME} has been deleted')
+                        print(f'[INFO] {self.DATABASE_FILE_NAME} has been deleted.\n')
 
+                i = 0
                 while True:
+
                     # receive message from connection
                     message = conn.recv()
 
@@ -114,16 +128,24 @@ class StreamManager:
                     if self.last_timestamp_sec is not None:
                         time_diff = timestamp_sec - self.last_timestamp_sec
                         self.cumulative_time += time_diff
+                        cumulative_time_str = round(self.cumulative_time, 3)
 
                     # add last price
                     if self.last_price is None:
                         self.last_price = price
 
-                    # add price
+                    # add price for self.cumulative_price
                     self.cumulative_price += price
 
                     # add quantity
                     self.cumulative_quantity += quantity
+
+                    # format cumulative values
+                    if self.cumulative_price:
+                        cumulative_price_str = int(self.cumulative_price)
+
+                    if self.cumulative_quantity:
+                        cumulative_quantity_str = round(self.cumulative_quantity, 2)
 
                     # save last timestamp
                     self.last_timestamp_sec = timestamp_sec
@@ -131,10 +153,21 @@ class StreamManager:
                     # add cumulative_count
                     self.cumulative_count += 1
 
-                    # test_point (real-time): cumulative_time | cumulative_count | cumulative_price | cumulative_quantity
-                    print(f'{self.cumulative_time} | {self.cumulative_count} | {self.cumulative_price} | {self.cumulative_quantity}')
+                    # test_point: cumulative_time | cumulative_count | cumulative_price | cumulative_quantity
+                    #print(
+                    #    f't:{self.cumulative_time} | '
+                    #    f'c:{self.cumulative_count} | '
+                    #    f'p:{self.cumulative_price} | '
+                    #    f'q:{self.cumulative_quantity}'
+                    #)
 
-                    if self.cumulative_time > 10:
+                    if self.cumulative_time > self.tumbling_window_seconds:
+                        i += 1 # increment total count...
+
+                        # print messeage
+                        print(f'*** While Loop {i} ***')
+                        print(f"[INFO] cumulative_time ({cumulative_time_str}s) exceeded the tumbling window duration.")
+
                         # create a database connection
                         db_conn = self._create_db_conn()
 
@@ -148,7 +181,8 @@ class StreamManager:
                                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                                 symbol TEXT,
                                 avg_price REAL,
-                                timestamp REAL
+                                cumulative_quantity REAL,
+                                current_timestamp REAL
                             )
                             '''
                         )
@@ -156,22 +190,40 @@ class StreamManager:
                         # count average price
                         self.avg_price = self.cumulative_price / self.cumulative_count
 
+                        # convert avg_price to integer for better output formatting
+                        avg_price_str = int(self.avg_price)
+
                         # get current timestamp
                         now = datetime.now()
                         current_timestamp = now.timestamp()
                         current_timestamp_str = now.strftime('%Y-%m-%d %H:%M:%S')
 
-                        # print messeage
-                        print(f'[{self.cumulative_count}] {current_timestamp_str} | '
-                              f'avg_price: {self.cumulative_price}/{self.cumulative_count} -> {self.avg_price}')
+                        # print message
+                        print(
+                            f'[INFO] '
+                            f'{self.cumulative_count} messages | current_timestamp: {current_timestamp_str} | '
+                            f'avg_price: {cumulative_price_str}/{self.cumulative_count} -> '
+                            f'{self.avg_price} | '
+                            f'cumulative_quantity: {cumulative_quantity_str}'
+                        )
 
-                        # insert a row of data (PEP 249 compliant)
+                        # Insert a row of data (PEP 249 compliant)
                         cursor.execute(
                             '''
-                            INSERT INTO stocks (symbol, avg_price, timestamp)
-                            VALUES (?, ?, ?)
+                            INSERT INTO stocks (
+                                symbol,
+                                avg_price,
+                                cumulative_quantity,
+                                current_timestamp
+                            )
+                            VALUES (?, ?, ?, ?)
                             ''',
-                            (symbol, self.avg_price, current_timestamp)
+                            (
+                                symbol,
+                                self.avg_price,
+                                self.cumulative_quantity,
+                                current_timestamp,
+                            ),
                         )
 
                         # commit the changes
@@ -183,7 +235,7 @@ class StreamManager:
                         last_row = cursor.fetchone()
 
                         # print the last inserted row
-                        print(f'  ╰─> Last inserted row: {last_row}')
+                        print(f'[INFO] Database row inserted successfully: {last_row}')
 
                         # run strategy
                         self.get_strategy.run(
@@ -200,7 +252,7 @@ class StreamManager:
                         self.cumulative_quantity = 0.0
 
             except KeyboardInterrupt:
-                print("Interrupted by user")
+                print('Interrupted by user')
 
     def _create_db_conn(self) -> sqlite3.Connection:
         """create a Connection object.
