@@ -33,16 +33,19 @@ class GetStrategy:
         )
 
         # check and validate strategy count
-        strategy_count = len(self._strategy_paths) - 1
-        if strategy_count > 0:
-            print(f'[INFO] {strategy_count} strategy module(s) detected and ready to load.')
-        else:
-            raise ValueError('[ERROR] No strategy modules found! Please add at least one strategy.')
+        strategy_count = len(self._strategy_paths) - 1  # exclude __init__.py from strategies
+
+        if strategy_count <= 0:
+            raise ValueError(
+                '[ERROR] No strategy modules found. Please add at least one strategy.'
+            )
+
+        print(f'[INFO] {strategy_count} strategy module(s) detected and ready to load.')
 
     def run(self, cursor):
         self.strategies = []
         for strategy_path in self._strategy_paths:
-            if strategy_path.stem != '__init__':
+            if strategy_path.stem != '__init__': # except for '__init__.py'
                 # convert snake_case file name to PascalCase class name
                 module_name = ''.join(
                     word.capitalize()
