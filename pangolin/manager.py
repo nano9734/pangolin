@@ -10,75 +10,82 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, see <https://www.gnu.org/licenses/>.
-"""
-this module uses strategy files to decide short/long trades.
-this module connects to an SQLite3 database.
+""" The stream manager is a core component of this software.
+
+It manages WebSocket stream communication, stores received data in the database,
+and executes the strategy module when predefined conditions are met.
+
+Low-level WebSocket communication is delegated to a WebSocket library, allowing
+the application layer to focus on data processing.
+
+The stream manager intentionally handles multiple responsibilities to keep the
+system simple and lightweight.
+
+No API manager is provided. The stream manager focuses on maintaining
+the WebSocket receive loop.
+
+REST API calls are intended to be handled within the strategy module. Execution
+timing, including sleep control, is also managed by the strategy logic and can
+be used to pause or stop the application as needed.
 """
 
-# standard library to run manager
+# Standard library imports for running the manager
 import json
 import os
 import sqlite3
 
-# to get current time with timestamp
+# Retrieve the current time as a timestamp
 from datetime import datetime
 
-# for better type hints...
+# Type hints for improved code readability
 from typing import Mapping
 
-# short-lived WebSocket using 'with' statement
+# WebSocket connection utilities
 from websocket import create_connection
 from contextlib import closing
 
-# load Pangolin local module(s)
+# Load strategy module(s)
 from .strategies import GetStrategy
 
 class StreamManager:
-    # file_path = pangolin/pangolin.db
     DATABASE_FILE_NAME = 'pangolin.db'
 
-    def __init__(
-        self,
-        loaded_config: Mapping[str, str],
-        wss_url: str
-    ):
-        """ initializes the instance for connecting websocket stream.
+    def __init__(self, loaded_config: Mapping[str, str], wss_url: str):
+        """Initializes the instance for connecting to a WebSocket stream.
 
         Args:
-            loaded_config: Configuration section for the exchange such as [Binance].
+            loaded_config: Configuration mapping for the exchange, such as Binance.
             wss_url: WebSocket stream URL used to connect to the exchange.
         """
-
-        # mark StreamManager startup
         print('*** StreamManager ***')
 
-        # create an instance of Config()
-        self.loaded_config = loaded_config
+        # Store the loaded configuration mapping
+        self.loaded_config: Mapping[str, str] = loaded_config
 
-        # get config
-        self.tumbling_window_seconds = int(self.loaded_config['tumbling_window_seconds'])
+        # Tumbling window duration (seconds) from configuration
+        self.tumbling_window_seconds: int = int(self.loaded_config['tumbling_window_seconds'])
 
-        # wss_url is created from UrlFactory()
-        self.wss_url = wss_url
+        # WebSocket server URL
+        self.wss_url: str = wss_url
 
-        # initialize last_values
-        self.last_trade_id = None
-        self.last_timestamp_sec = None
-        self.last_price = None
+        # Last processed trade data
+        self.last_trade_id: int = None
+        self.last_timestamp_sec: int = None
+        self.last_price: float = None
 
-        # initialize cumulative_values
+        # Cumulative statistics for processed trades
         self.cumulative_count: int = 0
         self.cumulative_time: float = 0.0
         self.cumulative_price: float = 0.0
         self.cumulative_quantity: float = 0.0
 
-        # print messeage
+        # Inform that the StreamManager has been successfully initialized
         print('[INFO] StreamManager initialized successfully.')
 
-        # add a line break for console readability
+        # Add a line break for console readability
         print()
 
-        # create an instance of GetStrategy()
+        # Instantiate the strategy handler for analyzing trade data, handling REST API calls, and managing execution timing.
         self.get_strategy = GetStrategy()
 
     def run(self):
