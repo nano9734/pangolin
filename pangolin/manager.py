@@ -82,26 +82,27 @@ class StreamManager:
         # Inform that the StreamManager has been successfully initialized
         print('[INFO] StreamManager initialized successfully.')
 
+        # Remove the database file if it exists before initializing the strategy module
+        self.delete_database_file()
+
+        # Instantiate the strategy handler for analyzing trade data, handling REST API calls, and managing execution timing
+        self.get_strategy = GetStrategy()
+
         # Add a line break for console readability
         print()
 
-        # Instantiate the strategy handler for analyzing trade data, handling REST API calls, and managing execution timing.
-        self.get_strategy = GetStrategy()
+    def delete_database_file(self):
+        """Delete the database file if it exists and log the action."""
+        if os.path.exists(self.DATABASE_FILE_NAME):
+            print(f'[INFO] {self.DATABASE_FILE_NAME} database file exists. Deleting it...')
+            os.remove(self.DATABASE_FILE_NAME)
+            print(f'[INFO] {self.DATABASE_FILE_NAME} has been deleted.\n')
+        else:
+            print(f'[INFO] {self.DATABASE_FILE_NAME} does not exist, nothing to delete.\n')
 
     def run(self):
-        with closing(
-            create_connection(
-                self.wss_url
-            )
-        ) as conn:
+        with closing(create_connection(self.wss_url)) as conn:
             try:
-                if os.path.exists(self.DATABASE_FILE_NAME):
-                    print(f'[INFO] {self.DATABASE_FILE_NAME} database file exists.')
-                    os.remove(self.DATABASE_FILE_NAME)
-
-                    if not os.path.exists(self.DATABASE_FILE_NAME):
-                        print(f'[INFO] {self.DATABASE_FILE_NAME} has been deleted.\n')
-
                 i = 0
                 while True:
 
