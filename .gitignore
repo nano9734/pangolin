@@ -1,0 +1,11 @@
+# Python cache
+__pycache__/
+
+# Virtual environment
+venv/
+
+# Database file
+pangolin.db
+
+# Configuration file
+pangolin.ini
