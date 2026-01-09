@@ -10,10 +10,11 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, see <https://www.gnu.org/licenses/>
-"""
-This module automatically imports strategy modules.
-This module creates an instance of its class.
-This module passes the database cursor to each strategy instance.
+"""Automatically imports strategy modules.
+
+This file (__init__.py) is used to load strategy modules automatically
+after the tumbling time window ends and the trading data has been
+fully saved to the database. The trading data is accessed via the cursor.
 """
 
 from pathlib import Path
@@ -27,44 +28,36 @@ class GetStrategy:
     def __init__(self):
         print('*** GetStrategy ***')
 
-        # all strategy paths
-        self._strategy_paths = list(
-            self.STRATEGY_DIR.glob('*.py')
-        )
+        # Retrieve all Python files in the strategy directory
+        self._strategy_paths = list(self.STRATEGY_DIR.glob('*.py'))
 
-        # check and validate strategy count
-        strategy_count = len(self._strategy_paths) - 1  # exclude __init__.py from strategies
+        # Count strategy modules, excluding '__init__.py'
+        strategy_count = len(self._strategy_paths) - 1
 
+        # Verify that at least one strategy module exists
         if strategy_count <= 0:
-            raise ValueError(
-                '[ERROR] No strategy modules found. Please add at least one strategy.'
-            )
+            raise ValueError('[ERROR] No strategy modules found. Please add at least one strategy.')
 
         print(f'[INFO] {strategy_count} strategy module(s) detected and ready to load.')
 
     def run(self, cursor):
         self.strategies = []
         for strategy_path in self._strategy_paths:
-            if strategy_path.stem != '__init__': # except for '__init__.py'
+            if strategy_path.stem != '__init__':
                 # convert snake_case file name to PascalCase class name
-                module_name = ''.join(
-                    word.capitalize()
-                    for word in strategy_path.stem.split('_')
-                )
+                module_name = ''.join(word.capitalize() for word in strategy_path.stem.split('_'))
 
-                # import the module and create an instance
-                instance = self._import_from_path(
-                    module_name,
-                    strategy_path,
-                    cursor # database cursor
-                )
+                # Dynamically import the strategy module and instantiate its class
+                instance = self._import_from_path(module_name, strategy_path, cursor)
 
-                if instance:
-                    self.strategies.append(instance)
+                # Add the strategy to the list of strategies
+                self.strategies.append(instance)
+
+                # Print a blank line to separate outputs for readability.
+                print()
 
     def _import_from_path(self, module_name, strategy_path, cursor):
-        """
-        Dynamically import a strategy module and instantiate its class.
+        """Dynamically import a strategy module and instantiate its class.
 
         Args:
             module_name (str): The PascalCase name of the class to import.
@@ -85,18 +78,16 @@ class GetStrategy:
             - The module file name (snake_case) is converted to PascalCase for the class.
             - This allows adding new strategy files without modifying the main code.
         """
-        spec = importlib.util.spec_from_file_location(
-            module_name,
-            strategy_path,
-        )
+        spec = importlib.util.spec_from_file_location(module_name, strategy_path)
 
         module = importlib.util.module_from_spec(spec)
         sys.modules[module_name] = module
         spec.loader.exec_module(module)
 
-        # if the class exists in the module, create an instance
+        # If the class exists in the module, instantiate it with the database cursor
         if hasattr(module, module_name):
             cls = getattr(module, module_name)
             instance = cls(cursor)
             return instance
+
         return None
