@@ -29,248 +29,194 @@ timing, including sleep control, is also managed by the strategy logic and can
 be used to pause or stop the application as needed.
 """
 
-# Standard library imports for running the manager
+# Standard library imports
 import json
 import os
 import sqlite3
+import time
+import traceback
+from datetime import datetime # Retrieve the current time as a timestamp
+from typing import Mapping # Type hints for improved code readability
 
-# Retrieve the current time as a timestamp
-from datetime import datetime
-
-# Type hints for improved code readability
-from typing import Mapping
-
-# WebSocket connection utilities
+# WebSocket
 from websocket import create_connection
+from websocket import WebSocketTimeoutException
 from contextlib import closing
 
-# Load strategy module(s)
+# Strategy
 from .strategies import GetStrategy
 
 class StreamManager:
-    DATABASE_FILE_NAME = 'pangolin.db'
+    STREAM_MANAGER_INTERRUPT_MSG = '[INFO] StreamManager interrupted by user.'
+    STREAM_MANAGER_INIT_MSG = '[INFO] StreamManager initialized successfully.'
+    TRADE_VALUES_RESET_MSG = '[INFO] All values related to trades have been successfully reset.'
+    WAIT_FILE_DELETE_MSG = "[INFO] Trade is currently pending; the order file still exists. Waiting until it is deleted... Pausing for {} seconds."
+    LOOP_PAUSED_MSG = "[INFO] Loop is currently paused..."
+    ORDER_PLACE_FILE_NAME = 'order_place.json'
+    ZERO_FLOAT = 0.0
 
-    def __init__(self, loaded_config: Mapping[str, str], wss_url: str):
-        """Initializes the instance for connecting to a WebSocket stream.
-
-        Args:
-            loaded_config: Configuration mapping for the exchange, such as Binance.
-            wss_url: WebSocket stream URL used to connect to the exchange.
-        """
+    def __init__(self, loaded_config: Mapping[str, str], wss_url: str, database):
+        self.TUMBLING_WINDOW_SECONDS = int(loaded_config['tumbling_window_seconds'])
+        self.PAUSE_INTERVAL_SECONDS = int(loaded_config['pause_interval_seconds'])
+        self.STRATEGY_INTERVAL = int(loaded_config['strategy_interval']) 
         print('*** StreamManager ***')
-
-        # Store the loaded configuration mapping
         self.loaded_config: Mapping[str, str] = loaded_config
-
-        # Tumbling window duration (seconds) from configuration
-        self.tumbling_window_seconds: int = int(self.loaded_config['tumbling_window_seconds'])
-
-        # WebSocket server URL
         self.wss_url: str = wss_url
-
-        # Last processed trade data
-        self.last_trade_id: int = None
-        self.last_timestamp_sec: int = None
-        self.last_price: float = None
-
-        # Cumulative statistics for processed trades
-        self.cumulative_count: int = 0
-        self.cumulative_time: float = 0.0
-        self.cumulative_price: float = 0.0
-        self.cumulative_quantity: float = 0.0
-
-        # Inform that the StreamManager has been successfully initialized
-        print('[INFO] StreamManager initialized successfully.')
-
-        # Remove the database file if it exists before initializing the strategy module
-        self.delete_database_file()
-
-        # Instantiate the strategy handler for analyzing trade data, handling REST API calls, and managing execution timing
+        self.database = database
+        self.last_timestamp = time.time()
+        self.reset_all_values(verbose=True)
+        print() # Add a line break for console readability
         self.get_strategy = GetStrategy()
 
-        # Add a line break for console readability
-        print()
+    def reset_cumulative_values(self) -> None:
+        self.cumulative_count = 0
+        self.cumulative_price = self.ZERO_FLOAT
+        self.cumulative_quantity = self.ZERO_FLOAT
 
-    def delete_database_file(self):
-        """Delete the database file if it exists and log the action."""
-        if os.path.exists(self.DATABASE_FILE_NAME):
-            print(f'[INFO] {self.DATABASE_FILE_NAME} database file exists. Deleting it...')
-            os.remove(self.DATABASE_FILE_NAME)
-            print(f'[INFO] {self.DATABASE_FILE_NAME} has been deleted.\n')
-        else:
-            print(f'[INFO] {self.DATABASE_FILE_NAME} does not exist, nothing to delete.\n')
+    def reset_last_values(self) -> None:
+        self.last_trade_id = None
+        self.last_price = None
+
+    def reset_all_values(self, verbose: bool = False) -> None:
+        self.reset_cumulative_values()
+        self.reset_last_values()
+
+        if verbose:
+            print(self.TRADE_VALUES_RESET_MSG)
+
+    def order_place_file_exist(self) -> bool:
+        file_path = os.path.join('pangolin', 'data', self.ORDER_PLACE_FILE_NAME)
+        return os.path.isfile(file_path)
 
     def run(self):
-        with closing(create_connection(self.wss_url)) as conn:
+        print() # Add a line break for console readability
+        self.paused = False
+        self.reset_done = False
+        self.timeout = 5
+        self.backoff = 1
+        self.max_backoff = 60
+        self.loop_count = 0
+        self.total_loop_count = 0
+
+        while True: # reconnect loop
             try:
-                i = 0
-                while True:
+                print("[WebSocket] Connecting...")
+                with closing(create_connection(self.wss_url, timeout=self.timeout)) as conn:
+                    conn.settimeout(1)
+                    print("[WebSocket] Connected")
+                    print() # Add a line break for console readability
+                    self.backoff = 1 # Reset backoff after successful connection
 
-                    # receive message from connection
-                    message = conn.recv()
+                    while True:  # streaming loop
+                        if self.order_place_file_exist():
+                            self.paused = True
+                        else:
+                            if self.paused: # transition point: resuming from pause
+                                self.last_timestamp = time.time()
+                                self.reset_all_values(verbose=True)
+                                self.reset_done = True
+                                self.loop_count = 0
+                                self.database.clear_table()
+                            self.paused = False
+                            self.reset_done = False
 
-                    # convert string to JSON
-                    json_data = json.loads(message)
+                        if self.paused:
+                            try:
+                                conn.recv()
+                            except WebSocketTimeoutException:
+                                pass
+                            except Exception as e:
+                                print("[WebSocket PAUSE RECV ERROR]:", e)
+                                raise
 
-                    # prevent duplicate trades
-                    trade_id = int(json_data['a'])
+                            if not self.reset_done:
+                                print(self.LOOP_PAUSED_MSG)
+                                self.reset_all_values(verbose=True)
+                                self.reset_done = True
 
-                    if trade_id == self.last_trade_id:
-                        continue # go to the next loop
+                            print(self.WAIT_FILE_DELETE_MSG.format(self.PAUSE_INTERVAL_SECONDS))
+                            time.sleep(self.PAUSE_INTERVAL_SECONDS)
+                            continue
 
-                    # store trade id as last trade id
-                    self.last_trade_id = trade_id
-
-                    # convert data
-                    if json_data:
-                        symbol = str(json_data['s'])
-                        price = float(json_data['p'])
-                        quantity = float(json_data['q'])
-                        timestamp_ms = int(json_data["T"])
-
-                    # convert milliseconds to seconds
-                    if timestamp_ms:
-                        timestamp_sec = timestamp_ms / 1000
-
-                    # add last time
-                    if self.last_timestamp_sec is not None:
-                        time_diff = timestamp_sec - self.last_timestamp_sec
-                        self.cumulative_time += time_diff
-                        cumulative_time_str = round(self.cumulative_time, 3)
-
-                    # add last price
-                    if self.last_price is None:
-                        self.last_price = price
-
-                    # add price for self.cumulative_price
-                    self.cumulative_price += price
-
-                    # add quantity
-                    self.cumulative_quantity += quantity
-
-                    # format cumulative values
-                    if self.cumulative_price:
-                        cumulative_price_str = int(self.cumulative_price)
-
-                    if self.cumulative_quantity:
-                        cumulative_quantity_str = round(self.cumulative_quantity, 2)
-
-                    # save last timestamp
-                    self.last_timestamp_sec = timestamp_sec
-
-                    # add cumulative_count
-                    self.cumulative_count += 1
-
-                    # test_point: cumulative_time | cumulative_count | cumulative_price | cumulative_quantity
-                    #print(
-                    #    f't:{self.cumulative_time} | '
-                    #    f'c:{self.cumulative_count} | '
-                    #    f'p:{self.cumulative_price} | '
-                    #    f'q:{self.cumulative_quantity}'
-                    #)
-
-                    if self.cumulative_time > self.tumbling_window_seconds:
-                        i += 1 # increment total count...
-
-                        # print messeage
-                        print(f'*** While Loop {i} ***')
-                        print(f"[INFO] cumulative_time ({cumulative_time_str}s) exceeded the tumbling window duration.")
-
-                        # create a database connection
-                        db_conn = self._create_db_conn()
-
-                        # create a cursor from the database connection
-                        cursor = db_conn.cursor()
-
-                        # create table if is needed
-                        cursor.execute(
-                            '''
-                            CREATE TABLE IF NOT EXISTS stocks (
-                                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                symbol TEXT,
-                                avg_price REAL,
-                                cumulative_quantity REAL,
-                                current_timestamp REAL
-                            )
-                            '''
-                        )
-
-                        # count average price
-                        self.avg_price = self.cumulative_price / self.cumulative_count
-
-                        # convert avg_price to integer for better output formatting
-                        avg_price_str = int(self.avg_price)
-
-                        # get current timestamp
-                        now = datetime.now()
-                        current_timestamp = now.timestamp()
-                        current_timestamp_str = now.strftime('%Y-%m-%d %H:%M:%S')
-
-                        # print message
-                        print(
-                            f'[INFO] '
-                            f'{self.cumulative_count} messages | current_timestamp: {current_timestamp_str} | '
-                            f'avg_price: {cumulative_price_str}/{self.cumulative_count} -> '
-                            f'{self.avg_price} | '
-                            f'cumulative_quantity: {cumulative_quantity_str}'
-                        )
-
-                        # Insert a row of data (PEP 249 compliant)
-                        cursor.execute(
-                            '''
-                            INSERT INTO stocks (
-                                symbol,
-                                avg_price,
-                                cumulative_quantity,
-                                current_timestamp
-                            )
-                            VALUES (?, ?, ?, ?)
-                            ''',
-                            (
-                                symbol,
-                                self.avg_price,
-                                self.cumulative_quantity,
-                                current_timestamp,
-                            ),
-                        )
-
-                        # commit the changes
-                        db_conn.commit()
-
-                        # fetch the last inserted row
-                        last_row_id = (cursor.lastrowid,)
-                        cursor.execute('SELECT * FROM stocks WHERE id = ?', last_row_id)
-                        last_row = cursor.fetchone()
-
-                        # print the last inserted row
-                        print(f'[INFO] Database row inserted successfully: {last_row}')
-
-                        # run strategy
-                        self.get_strategy.run(
-                            cursor=cursor # Sqlite3 cursor required
-                        )
-
-                        # close the database connection
-                        cursor.close()
-
-                        # reset the cumulative values for next loop
-                        self.cumulative_count = 0
-                        self.cumulative_time = 0.0
-                        self.cumulative_price = 0.0
-                        self.cumulative_quantity = 0.0
+                        self.process_stream_data(conn)
+                        time.sleep(0.05)
 
             except KeyboardInterrupt:
-                print('Interrupted by user')
+                self.database.close()
+                print(self.STREAM_MANAGER_INTERRUPT_MSG)
+                break
 
-    def _create_db_conn(self) -> sqlite3.Connection:
-        """create a Connection object.
+            except Exception as e:
+                print("[WebSocket ERROR]:", e)
+                traceback.print_exc()
 
-        Returns:
-            sqlite3.Connection: A connection object to the SQLite database.
+            print(f"[WebSocket] Reconnecting in {self.backoff} sec...")
+            time.sleep(self.backoff)
+            self.backoff = min(self.max_backoff, self.backoff * 2)
 
-        Raises:
-            No need to raise here, because the validation has already been processed.
-        """
-        return sqlite3.connect(
-            self.DATABASE_FILE_NAME
-        )
+    def process_stream_data(self, conn):
+        try:
+            message = conn.recv()
+        except WebSocketTimeoutException:
+            return
+        except Exception as recv_e:
+            print("[WebSocket RECV ERROR]:", recv_e)
+            traceback.print_exc()
+            raise
+
+        try:
+            json_data = json.loads(message)
+
+            if self.is_trade_id_duplicate(trade_id=int(json_data['a'])):
+                return # go to the next loop
+
+            symbol, price, quantity, timestamp_sec = self.parse_trade_message(json_data=json_data)
+
+            self.cumulative_count += 1
+            self.cumulative_price += price
+            self.cumulative_quantity += quantity
+
+            current_timestamp = time.time()
+            current_timestamp_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(current_timestamp))
+            if current_timestamp - self.last_timestamp >= self.TUMBLING_WINDOW_SECONDS:
+                self.loop_count += 1
+                self.total_loop_count += 1
+                self.last_timestamp += self.TUMBLING_WINDOW_SECONDS
+                self.avg_price = self.cumulative_price / self.cumulative_count
+                print(f'*** iteration {self.loop_count} ***')
+                print(f'Received: {self.cumulative_count} messages')
+                print(f'Time:     {current_timestamp_str}')
+                print(f'Price:    {self.cumulative_price:.0f} / {self.cumulative_count} = {self.avg_price:.4f}')
+                print(f'Quantity: {self.cumulative_quantity:.2f}')
+                print() # add a line break for console readability
+                self.database.insert_row(
+                    symbol=symbol,
+                    avg_price=self.avg_price,
+                    cumulative_quantity=self.cumulative_quantity,
+                    current_timestamp=current_timestamp
+                )
+
+                self.reset_cumulative_values()
+
+                if self.loop_count % self.STRATEGY_INTERVAL == 0:
+                    self.get_strategy.run(
+                        cursor=self.database.cursor
+                    )
+
+        except (ValueError, KeyError, TypeError) as json_e:
+            print("[JSON ERROR]:", json_e, "| message skipped")
+            return
+
+    def is_trade_id_duplicate(self, trade_id: int) -> bool:
+        if trade_id == self.last_trade_id:
+            return True
+        self.last_trade_id = trade_id
+        return False
+
+    def parse_trade_message(self, json_data):
+        symbol = str(json_data['s'])
+        price = float(json_data['p'])
+        quantity = float(json_data['q'])
+        timestamp_ms = int(json_data["T"])
+        timestamp_sec = timestamp_ms / 1000 # convert milliseconds to seconds
+        return symbol, price, quantity, timestamp_sec
