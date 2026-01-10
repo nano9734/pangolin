@@ -29,6 +29,7 @@ Additional Notes:
 # Load Pangolin components
 from pangolin import Config
 from pangolin import UrlFactory
+from pangolin import Database
 from pangolin import StreamManager
 
 # Parse WebSocket URL into components (scheme, netloc, path, etc.)
@@ -36,7 +37,6 @@ from urllib.parse import urlparse
 
 # define main function
 def main():
-    # Create a Config object
     config = Config()
 
     # Load the configuration file
@@ -44,6 +44,7 @@ def main():
         file_path=config.CONFIG_FILE_NAME,
         allow_missing=False
     )
+
 
     # Create an instance of UrlFactory to generate WebSocket URL
     url_factory = UrlFactory()
@@ -54,6 +55,8 @@ def main():
         symbol = loaded_config['Binance']['supported_coin'].lower()
         parsed_url = urlparse(base_url)
 
+        database = Database(exchange_name='binance')
+
     # Generate the WebSocket URL
     wss_url = url_factory.create_wss_url(
         netloc=parsed_url.netloc,
@@ -63,6 +66,7 @@ def main():
     # Initialize the StreamManager
     manager = StreamManager(
         loaded_config=loaded_config['Binance'],
+        database=database,
         wss_url=wss_url
     )
 
