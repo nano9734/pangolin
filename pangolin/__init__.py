@@ -22,4 +22,5 @@ Modules:
 
 from .config import Config
 from .factory import UrlFactory
+from .database import Database
 from .manager import StreamManager
