@@ -23,48 +23,21 @@ import os
 import sys
 
 class Config:
-    CONFIG_FILE_NAME = 'pangolin.ini'
-
-    def __init__(self):
+    def __init__(self, config_file_name: str):
+        self.CONFIG_FILE_NAME = config_file_name
+        self.CONFIG_FILE_NOT_FOUND_MSG = '[INFO] Configuration file not found:' + self.CONFIG_FILE_NAME
+        self.CONFIG_LOAD_SUCCESS_MSG =   '[INFO] Pangolin configuration loaded successfully and is ready for use.'
         print('*** Config ***')
 
-    def load(
-        self,
-        file_path: str,
-        allow_missing: bool
-    ) -> configparser.ConfigParser:
-        """ Loads a config file from the given file path.
-
-        Args:
-            file_path (str): File path where the config file is located.
-            allow_missing (bool): If True, do not raise an error if the file is missing.
-
-        Returns:
-            configparser.ConfigParser: The loaded configuration object.
-
-        Raises:
-            FileNotFoundError: If allow_missing is False and the file does not exist.
-        """
-        if not os.path.exists(file_path):
+    def load(self, allow_missing: bool) -> configparser.ConfigParser:
+        if not os.path.exists(self.CONFIG_FILE_NAME):
             if not allow_missing:
-                raise FileNotFoundError(
-                    f'Configuration file not found: "{file_path}"'
-                )
+                raise FileNotFoundError(self.CONFIG_FILE_NOT_FOUND_MSG)
 
-        # initialize ConfigParser
         config = configparser.ConfigParser()
+        config.read(self.CONFIG_FILE_NAME, encoding='utf-8')
 
-        # read Pangolin settings from config file
-        config.read(
-            file_path,
-            encoding='utf-8',
-        )
+        print(self.CONFIG_LOAD_SUCCESS_MSG)
+        print() # add a line break for console readability
 
-        # print messeage
-        print('[INFO] Pangolin configuration loaded successfully and is ready for use.')
-
-        # add a line break for console readability
-        print()
-
-        # return the loaded configuration
         return config
