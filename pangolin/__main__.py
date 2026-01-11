@@ -26,41 +26,20 @@ Additional Notes:
 - Terminate the program safely using Ctrl + C.
 """
 
-# Load Pangolin components
 from pangolin import Config
 from pangolin import UrlFactory
 from pangolin import Database
 from pangolin import Client
 from pangolin import StreamManager
-
 from urllib.parse import urlparse
 import os
 
-# -----------------------------
-# Project and data paths
-# -----------------------------
 PROJECT_NAME = 'pangolin'
 DATA_FOLDER_NAME = 'data'
-
-# -----------------------------
-# Order placement file
-# -----------------------------
 ORDER_PLACE_FILE_NAME = 'order_place.json'
 ORDER_PLACE_FILE_PATH = os.path.join(PROJECT_NAME, DATA_FOLDER_NAME, ORDER_PLACE_FILE_NAME)
-
-# -----------------------------
-# Configuration file
-# -----------------------------
 CONFIG_FILE_NAME = 'pangolin.ini'
-
-# -----------------------------
-# Database file
-# -----------------------------
 DATABASE_FILE_NAME = 'pangolin.db'
-
-# -----------------------------
-# Exchange identifiers
-# -----------------------------
 BINANCE_EXCHANGE_NAME = 'binance'
 BINANCE_EXCHANGE_NAME_CAPITALIZED = BINANCE_EXCHANGE_NAME.capitalize()
 

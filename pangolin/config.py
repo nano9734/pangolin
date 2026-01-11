@@ -25,8 +25,8 @@ import sys
 class Config:
     def __init__(self, config_file_name: str):
         self.CONFIG_FILE_NAME = config_file_name
+        self.CONFIG_LOAD_SUCCESS_MSG   = '[INFO] Pangolin configuration loaded successfully and is ready for use.'
         self.CONFIG_FILE_NOT_FOUND_MSG = '[INFO] Configuration file not found:' + self.CONFIG_FILE_NAME
-        self.CONFIG_LOAD_SUCCESS_MSG =   '[INFO] Pangolin configuration loaded successfully and is ready for use.'
         print('*** Config ***')
 
     def load(self, allow_missing: bool) -> configparser.ConfigParser:

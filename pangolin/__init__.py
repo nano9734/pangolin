@@ -12,7 +12,7 @@
 # along with this program; if not, see <https://www.gnu.org/licenses/>.
 """Pangolin Package Initialization
 
-This package provides the core components for running Pangolin:
+This package provides the core components for running Pangolin.
 
 Modules:
     config (Config)        : Handles configuration loading and validation.
