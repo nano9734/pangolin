@@ -30,49 +30,68 @@ Additional Notes:
 from pangolin import Config
 from pangolin import UrlFactory
 from pangolin import Database
+from pangolin import Client
 from pangolin import StreamManager
 
-# Parse WebSocket URL into components (scheme, netloc, path, etc.)
 from urllib.parse import urlparse
+import os
 
-# define main function
+# -----------------------------
+# Project and data paths
+# -----------------------------
+PROJECT_NAME = 'pangolin'
+DATA_FOLDER_NAME = 'data'
+
+# -----------------------------
+# Order placement file
+# -----------------------------
+ORDER_PLACE_FILE_NAME = 'order_place.json'
+ORDER_PLACE_FILE_PATH = os.path.join(PROJECT_NAME, DATA_FOLDER_NAME, ORDER_PLACE_FILE_NAME)
+
+# -----------------------------
+# Configuration file
+# -----------------------------
+CONFIG_FILE_NAME = 'pangolin.ini'
+
+# -----------------------------
+# Database file
+# -----------------------------
+DATABASE_FILE_NAME = 'pangolin.db'
+
+# -----------------------------
+# Exchange identifiers
+# -----------------------------
+BINANCE_EXCHANGE_NAME = 'binance'
+BINANCE_EXCHANGE_NAME_CAPITALIZED = BINANCE_EXCHANGE_NAME.capitalize()
+
 def main():
-    config = Config()
-
-    # Load the configuration file
-    loaded_config = config.load(
-        file_path=config.CONFIG_FILE_NAME,
-        allow_missing=False
-    )
-
-
-    # Create an instance of UrlFactory to generate WebSocket URL
+    config = Config(config_file_name=CONFIG_FILE_NAME)
+    loaded_config = config.load(allow_missing=False)
     url_factory = UrlFactory()
 
-    # Check if Binance is enabled in the configuration
-    if loaded_config['Binance'].getboolean('is_enabled'):
-        base_url = loaded_config['Binance']['base_url']
-        symbol = loaded_config['Binance']['supported_coin'].lower()
-        parsed_url = urlparse(base_url)
+    if binance_enabled(loaded_config):
+        enabled_exchange_name = BINANCE_EXCHANGE_NAME
+        enabled_exchange_name_capitalized = BINANCE_EXCHANGE_NAME_CAPITALIZED
+        netloc = urlparse(loaded_config[enabled_exchange_name_capitalized]['wss_url']).netloc
+        ticker = loaded_config[enabled_exchange_name_capitalized]['supported_coin'].lower() + 'usdt'
+        database = Database(enabled_exchange_name, database_file_name=DATABASE_FILE_NAME)
+        wss_url = url_factory.create_wss_url(enabled_exchange_name=enabled_exchange_name, netloc=netloc, ticker=ticker)
 
-        database = Database(exchange_name='binance')
-
-    # Generate the WebSocket URL
-    wss_url = url_factory.create_wss_url(
-        netloc=parsed_url.netloc,
-        ticker=symbol + 'usdt'
-    )
-
-    # Initialize the StreamManager
+    client = Client(enabled_exchange_name=enabled_exchange_name, order_place_file_name=ORDER_PLACE_FILE_NAME)
+    loaded_exchange_config = loaded_config[enabled_exchange_name_capitalized]
     manager = StreamManager(
-        loaded_config=loaded_config['Binance'],
+        enabled_exchange_name=enabled_exchange_name,
+        loaded_exchange_config=loaded_exchange_config,
         database=database,
-        wss_url=wss_url
+        wss_url=wss_url,
+        order_place_file_name=ORDER_PLACE_FILE_NAME
     )
 
-    # Execute the manager to start the associated tasks
     manager.run()
 
-# Execute only run as a script
+def binance_enabled(config):
+    return config['Binance'].getboolean('is_enabled')
+
+# execute only run as a script
 if __name__ == '__main__':
     main()
