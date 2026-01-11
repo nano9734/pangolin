@@ -9,3 +9,7 @@ pangolin.db
 
 # Configuration file
 pangolin.ini
+
+# PEM files
+private_key.pem
+public_key.pem
