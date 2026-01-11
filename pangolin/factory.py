@@ -10,11 +10,14 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, see <https://www.gnu.org/licenses/>.
-""" UrlFactory helps you to manage URL
-
-"""
 
 class UrlFactory:
-    def create_wss_url(self, netloc: str, ticker: str) -> str:
-        if netloc == 'fstream.binance.com':
-            return f'wss://{netloc}/ws/{ticker}@aggTrade'
+    def __init__(self):
+        self.CREATE_SUCCESS_MSG = '[UrlFactory] WebSocket URL has been successfully assembled:'
+
+    def create_wss_url(self, enabled_exchange_name:str, netloc: str, ticker: str) -> str:
+        if enabled_exchange_name == 'binance':
+            wss_url = 'wss://' + netloc + '/ws/' + ticker + '@aggTrade'
+            print(self.CREATE_SUCCESS_MSG, wss_url)
+            print() # Add a line break for console readability
+            return wss_url
