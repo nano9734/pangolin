@@ -23,13 +23,14 @@ import os
 import sys
 
 class Config:
-    def __init__(self, config_file_name: str):
+    def __init__(self, config_file_name: str, config_section_header_name: str):
+        self.CONFIG_SECTION_HEADER_NAME = config_section_header_name 
         self.CONFIG_FILE_NAME = config_file_name
-        self.CONFIG_LOAD_SUCCESS_MSG   = '[INFO] Pangolin configuration loaded successfully and is ready for use.'
+        self.CONFIG_LOAD_SUCCESS_MSG = f'[INFO] Pangolin configuration file ({self.CONFIG_FILE_NAME}) loaded.'
         self.CONFIG_FILE_NOT_FOUND_MSG = '[INFO] Configuration file not found:' + self.CONFIG_FILE_NAME
-        print('*** Config ***')
 
     def load(self, allow_missing: bool) -> configparser.ConfigParser:
+        print(self.CONFIG_SECTION_HEADER_NAME)
         if not os.path.exists(self.CONFIG_FILE_NAME):
             if not allow_missing:
                 raise FileNotFoundError(self.CONFIG_FILE_NOT_FOUND_MSG)
