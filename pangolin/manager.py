@@ -1,222 +1,168 @@
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program; if not, see <https://www.gnu.org/licenses/>.
-""" The stream manager is a core component of this software.
+# SPDX-License-Identifier: GPL-2.0-or-later
 
-It manages WebSocket stream communication, stores received data in the database,
-and executes the strategy module when predefined conditions are met.
-
-Low-level WebSocket communication is delegated to a WebSocket library, allowing
-the application layer to focus on data processing.
-
-The stream manager intentionally handles multiple responsibilities to keep the
-system simple and lightweight.
-
-No API manager is provided. The stream manager focuses on maintaining
-the WebSocket receive loop.
-
-REST API calls are intended to be handled within the strategy module. Execution
-timing, including sleep control, is also managed by the strategy logic and can
-be used to pause or stop the application as needed.
-"""
-
-# Standard library imports
 import json
 import os
-import sqlite3
 import time
-import traceback
-from datetime import datetime # Retrieve the current time as a timestamp
-from typing import Mapping # Type hints for improved code readability
-
-# WebSocket
+from contextlib import closing
+from datetime import datetime
+from typing import Mapping
+from typing import Tuple
 from websocket import create_connection
 from websocket import WebSocketTimeoutException
-from contextlib import closing
-
-# Strategy
 from .strategies import GetStrategy
+from dataclasses import dataclass
 
-class StreamManager:
+class Manager:
     STREAM_MANAGER_INTERRUPT_MSG = '[INFO] StreamManager interrupted by user.'
-    STREAM_MANAGER_INIT_MSG = '[INFO] StreamManager initialized successfully.'
-    TRADE_VALUES_RESET_MSG = '[INFO] All values related to trades have been successfully reset.'
-    WAIT_FILE_DELETE_MSG = "[INFO] Trade is currently pending; the order file still exists. Waiting until it is deleted... Pausing for {} seconds."
-    LOOP_PAUSED_MSG = "[INFO] Loop is currently paused..."
-    ORDER_PLACE_FILE_NAME = 'order_place.json'
+    CONNECTION_MSG = "[WebSocket] connected to {} at {}"
     ZERO_FLOAT = 0.0
 
-    def __init__(self, loaded_config: Mapping[str, str], wss_url: str, database):
-        self.TUMBLING_WINDOW_SECONDS = int(loaded_config['tumbling_window_seconds'])
-        self.PAUSE_INTERVAL_SECONDS = int(loaded_config['pause_interval_seconds'])
-        self.STRATEGY_INTERVAL = int(loaded_config['strategy_interval']) 
-        print('*** StreamManager ***')
-        self.loaded_config: Mapping[str, str] = loaded_config
-        self.wss_url: str = wss_url
+    def __init__(self, enabled_exchange_name: str, loaded_exchange_config: Mapping[str, str], wss_url: str, database: "Database", order_place_file_path: str):
+        self.enabled_exchange_name = enabled_exchange_name
+        self.loaded_exchange_config = loaded_exchange_config
+        self.wss_url = wss_url
         self.database = database
-        self.last_timestamp = time.time()
-        self.reset_all_values(verbose=True)
-        print() # Add a line break for console readability
-        self.get_strategy = GetStrategy()
-
-    def reset_cumulative_values(self) -> None:
+        self.order_place_file_path = order_place_file_path
         self.cumulative_count = 0
         self.cumulative_price = self.ZERO_FLOAT
         self.cumulative_quantity = self.ZERO_FLOAT
-
-    def reset_last_values(self) -> None:
         self.last_trade_id = None
         self.last_price = None
-
-    def reset_all_values(self, verbose: bool = False) -> None:
-        self.reset_cumulative_values()
-        self.reset_last_values()
-
-        if verbose:
-            print(self.TRADE_VALUES_RESET_MSG)
-
-    def order_place_file_exist(self) -> bool:
-        file_path = os.path.join('pangolin', 'data', self.ORDER_PLACE_FILE_NAME)
-        return os.path.isfile(file_path)
+        self.last_current_time = time.time()
+        self.avg_price = self.ZERO_FLOAT
+        self.display_loop_count = 0
+        self.total_loop_count = 0
+        self.strategy = GetStrategy()
 
     def run(self):
-        print() # Add a line break for console readability
-        self.paused = False
-        self.reset_done = False
-        self.timeout = 5
-        self.backoff = 1
-        self.max_backoff = 60
-        self.loop_count = 0
-        self.total_loop_count = 0
+        retry_count = 0
+        stop_running = False
+        print(f"[INFO] StreamManager started for exchange '{self.exchange_name}'")
 
-        while True: # reconnect loop
+        if self.order_place_file_exists:
+            raise FileExistsError(f"Order place file already exists: {self.order_place_file_path}")
+
+        while True:
             try:
-                print("[WebSocket] Connecting...")
-                with closing(create_connection(self.wss_url, timeout=self.timeout)) as conn:
-                    conn.settimeout(1)
-                    print("[WebSocket] Connected")
-                    print() # Add a line break for console readability
-                    self.backoff = 1 # Reset backoff after successful connection
+                with closing(create_connection(self.wss_url, timeout=30, enable_multithread=True, ping_interval=20, ping_timeout=10)) as ws_conn:
+                    retry_count = 0  # reset on success
+                    trade_data_extractor = self.get_trade_data_extractor()
+                    self.log_ws_connected() # log connection message
+                    last_recv_time = time.time()
 
-                    while True:  # streaming loop
-                        if self.order_place_file_exist():
-                            self.paused = True
-                        else:
-                            if self.paused: # transition point: resuming from pause
-                                self.last_timestamp = time.time()
-                                self.reset_all_values(verbose=True)
-                                self.reset_done = True
-                                self.loop_count = 0
-                                self.database.clear_table()
-                            self.paused = False
-                            self.reset_done = False
-
-                        if self.paused:
-                            try:
-                                conn.recv()
-                            except WebSocketTimeoutException:
-                                pass
-                            except Exception as e:
-                                print("[WebSocket PAUSE RECV ERROR]:", e)
-                                raise
-
-                            if not self.reset_done:
-                                print(self.LOOP_PAUSED_MSG)
-                                self.reset_all_values(verbose=True)
-                                self.reset_done = True
-
-                            print(self.WAIT_FILE_DELETE_MSG.format(self.PAUSE_INTERVAL_SECONDS))
-                            time.sleep(self.PAUSE_INTERVAL_SECONDS)
+                    while True:
+                        try:
+                            message = ws_conn.recv()
+                            if not message:
+                                raise ConnectionError("Empty message received")
+                            last_recv_time = time.time()
+                        except WebSocketTimeoutException:
+                            if time.time() - last_recv_time > 60:
+                                raise ConnectionError("No data for 60s")
                             continue
 
-                        self.process_stream_data(conn)
-                        time.sleep(0.05)
+                        try:
+                            symbol, price, quantity, timestamp = trade_data_extractor(message)
+                        except (json.JSONDecodeError, KeyError, TypeError) as e:
+                            print(f"[WARN] parse error: {e}")
+                            continue
+
+                        self.cumulative_count += 1
+                        self.cumulative_price += price
+                        self.cumulative_quantity += quantity
+
+                        # 10초 간격 타이머 출력
+                        current_time = time.time()
+                        current_time_str = datetime.fromtimestamp(current_time).strftime('%Y-%m-%d %H:%M:%S')
+                        if current_time - self.last_current_time >= 10:
+                            if self.order_place_file_exists:
+                                stop_running = True
+                                break
+                            self.display_loop_count += 1
+                            self.total_loop_count += 1
+
+                            if self.total_loop_count % 360 == 0:
+                                print(f"[INFO] Total loop[{self.total_loop_count}] reached 1000. All will be reset at {current_time_str}.")
+                                self.last_current_time = current_time
+                                self.cumulative_count = 0
+                                self.cumulative_price = self.ZERO_FLOAT
+                                self.cumulative_quantity = self.ZERO_FLOAT
+                                self.display_loop_count = 0
+                                self.total_loop_count = 0
+                                self.database.delete_all_stocks()
+                                self.database.save_changes()
+                                continue # do not use raise, go to the next iteration
+
+                            if self.total_loop_count % 6 == 0:
+                                self.database.save_changes()
+                                self.strategy.execute(database_cursor=self.database.cursor)
+
+                            self.avg_price = self.cumulative_price / self.cumulative_count
+
+                            stock_record = {
+                                "symbol": symbol,
+                                "avg_price": self.avg_price,
+                                "cumulative_quantity": self.cumulative_quantity,
+                                "current_time": current_time
+                            }
+
+                            self.database.insert_row(**stock_record)
+
+                            print(f'*** iteration {self.display_loop_count} ***')
+                            print(f'Received: {self.cumulative_count} messages')
+                            print(f'Time:     {current_time_str}')
+                            print(f'Price:    {self.cumulative_price:.0f} / {self.cumulative_count} = {self.avg_price:.4f}')
+                            print(f'Quantity: {self.cumulative_quantity:.2f}')
+                            print() # add a line break for console readability
+                            self.last_current_time = current_time
+                            self.cumulative_count = 0
+                            self.cumulative_price = self.ZERO_FLOAT
+                            self.cumulative_quantity = self.ZERO_FLOAT
+
+                    if stop_running:
+                        print("Exiting outer loop")
+                        break  # outer loop 탈출
 
             except KeyboardInterrupt:
-                self.database.close()
                 print(self.STREAM_MANAGER_INTERRUPT_MSG)
                 break
 
+            except (ConnectionError, TimeoutError) as e:
+                retry_count += 1
+                wait = min(60, 2 ** retry_count)
+                print(f"[WS ERROR] {e}, retry in {wait}s")
+                time.sleep(wait)
+
             except Exception as e:
-                print("[WebSocket ERROR]:", e)
-                traceback.print_exc()
+                print(f"[FATAL] {e}")
+                raise
 
-            print(f"[WebSocket] Reconnecting in {self.backoff} sec...")
-            time.sleep(self.backoff)
-            self.backoff = min(self.max_backoff, self.backoff * 2)
+    def get_trade_data_extractor(self):
+        extractor_name = f"extract_{self.enabled_exchange_name}_trade_data"
+        extractor = getattr(self, extractor_name, None)
 
-    def process_stream_data(self, conn):
-        try:
-            message = conn.recv()
-        except WebSocketTimeoutException:
-            return
-        except Exception as recv_e:
-            print("[WebSocket RECV ERROR]:", recv_e)
-            traceback.print_exc()
-            raise
+        if extractor is None:
+            raise ValueError(f"[ERROR] Unsupported exchange: {self.enabled_exchange_name}")
 
-        try:
-            json_data = json.loads(message)
+        return extractor
 
-            if self.is_trade_id_duplicate(trade_id=int(json_data['a'])):
-                return # go to the next loop
+    @property
+    def order_place_file_exists(self) -> bool:
+        return os.path.exists(self.order_place_file_path)
 
-            symbol, price, quantity, timestamp_sec = self.parse_trade_message(json_data=json_data)
+    @property
+    def exchange_name(self) -> str:
+        return self.enabled_exchange_name
 
-            self.cumulative_count += 1
-            self.cumulative_price += price
-            self.cumulative_quantity += quantity
+    def log_ws_connected(self) -> None:
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        message = self.CONNECTION_MSG.format(self.wss_url, timestamp)
+        print(message)
 
-            current_timestamp = time.time()
-            current_timestamp_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(current_timestamp))
-            if current_timestamp - self.last_timestamp >= self.TUMBLING_WINDOW_SECONDS:
-                self.loop_count += 1
-                self.total_loop_count += 1
-                self.last_timestamp += self.TUMBLING_WINDOW_SECONDS
-                self.avg_price = self.cumulative_price / self.cumulative_count
-                print(f'*** iteration {self.loop_count} ***')
-                print(f'Received: {self.cumulative_count} messages')
-                print(f'Time:     {current_timestamp_str}')
-                print(f'Price:    {self.cumulative_price:.0f} / {self.cumulative_count} = {self.avg_price:.4f}')
-                print(f'Quantity: {self.cumulative_quantity:.2f}')
-                print() # add a line break for console readability
-                self.database.insert_row(
-                    symbol=symbol,
-                    avg_price=self.avg_price,
-                    cumulative_quantity=self.cumulative_quantity,
-                    current_timestamp=current_timestamp
-                )
-
-                self.reset_cumulative_values()
-
-                if self.loop_count % self.STRATEGY_INTERVAL == 0:
-                    self.get_strategy.run(
-                        cursor=self.database.cursor
-                    )
-
-        except (ValueError, KeyError, TypeError) as json_e:
-            print("[JSON ERROR]:", json_e, "| message skipped")
-            return
-
-    def is_trade_id_duplicate(self, trade_id: int) -> bool:
-        if trade_id == self.last_trade_id:
-            return True
-        self.last_trade_id = trade_id
-        return False
-
-    def parse_trade_message(self, json_data):
+    def extract_binance_trade_data(self, message: str) -> Tuple[str, float, float, float]:
+        json_data = json.loads(message)
         symbol = str(json_data['s'])
         price = float(json_data['p'])
         quantity = float(json_data['q'])
-        timestamp_ms = int(json_data["T"])
-        timestamp_sec = timestamp_ms / 1000 # convert milliseconds to seconds
-        return symbol, price, quantity, timestamp_sec
+        timestamp = int(json_data["T"]) / 1000
+        return symbol, price, quantity, timestamp
