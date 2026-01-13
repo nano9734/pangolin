@@ -3,26 +3,54 @@
 import json
 import os
 import time
+import importlib.util
+import sys
 from contextlib import closing
 from datetime import datetime
+from pathlib import Path
 from typing import Mapping
 from typing import Tuple
 from websocket import create_connection
 from websocket import WebSocketTimeoutException
-from .strategies import GetStrategy
 from dataclasses import dataclass
+
+class Strategy:
+    def __init__(self, strategy_folder_path: str):
+        self.strategy_folder_path = Path(strategy_folder_path)
+        self.strategy_paths = list(self.strategy_folder_path.glob('*.py'))
+
+        if len(self.strategy_paths) == 1:
+            pass
+
+    def create_instance(self, database_cursor):
+        module_name = self.strategy_paths[0].stem.replace("_", " ").title().replace(" ", "")
+        spec = importlib.util.spec_from_file_location(module_name, self.strategy_paths[0])
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+        strategy_class = getattr(module, module_name)
+        return strategy_class(database_cursor=database_cursor)
 
 class Manager:
     STREAM_MANAGER_INTERRUPT_MSG = '[INFO] StreamManager interrupted by user.'
     CONNECTION_MSG = "[WebSocket] connected to {} at {}"
     ZERO_FLOAT = 0.0
 
-    def __init__(self, enabled_exchange_name: str, loaded_exchange_config: Mapping[str, str], wss_url: str, database: "Database", order_place_file_path: str):
+    def __init__(
+        self,
+        enabled_exchange_name: str,
+        loaded_exchange_config: Mapping[str, str],
+        wss_url: str,
+        database: "Database",
+        order_place_file_path: str,
+        strategy_folder_path: str
+    ):
         self.enabled_exchange_name = enabled_exchange_name
         self.loaded_exchange_config = loaded_exchange_config
         self.wss_url = wss_url
         self.database = database
         self.order_place_file_path = order_place_file_path
+        self.strategy_folder_path = strategy_folder_path
         self.cumulative_count = 0
         self.cumulative_price = self.ZERO_FLOAT
         self.cumulative_quantity = self.ZERO_FLOAT
@@ -32,7 +60,7 @@ class Manager:
         self.avg_price = self.ZERO_FLOAT
         self.display_loop_count = 0
         self.total_loop_count = 0
-        self.strategy = GetStrategy()
+        self.strategy = Strategy(strategy_folder_path=strategy_folder_path)
 
     def run(self):
         retry_count = 0
@@ -95,7 +123,8 @@ class Manager:
 
                             if self.total_loop_count % 6 == 0:
                                 self.database.save_changes()
-                                self.strategy.execute(database_cursor=self.database.cursor)
+                                strategy_instance = self.strategy.create_instance(self.database.cursor)
+                                strategy_instance.execute()
 
                             self.avg_price = self.cumulative_price / self.cumulative_count
 
