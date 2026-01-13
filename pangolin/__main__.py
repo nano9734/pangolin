@@ -144,7 +144,8 @@ def main():
         wss_url=wss_url,
         database=database,
         order_place_file_path=ProjectPaths.ORDER_PLACE,
-        strategy_folder_path=ProjectPaths.STRATEGY
+        strategy_folder_path=ProjectPaths.STRATEGY,
+        response_file_path=ProjectPaths.RESPONSE
     )
 
     if not file_check.order_place_file_exists and not file_check.response_file_exists:

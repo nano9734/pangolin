@@ -22,14 +22,14 @@ class Strategy:
         if len(self.strategy_paths) == 1:
             pass
 
-    def create_instance(self, database_cursor):
+    def create_instance(self, database_cursor, strategy_folder_path:str, response_file_path: str):
         module_name = self.strategy_paths[0].stem.replace("_", " ").title().replace(" ", "")
         spec = importlib.util.spec_from_file_location(module_name, self.strategy_paths[0])
         module = importlib.util.module_from_spec(spec)
         sys.modules[module_name] = module
         spec.loader.exec_module(module)
         strategy_class = getattr(module, module_name)
-        return strategy_class(database_cursor=database_cursor)
+        return strategy_class(database_cursor=database_cursor, strategy_folder_path=strategy_folder_path, response_file_path=response_file_path)
 
 class Manager:
     STREAM_MANAGER_INTERRUPT_MSG = '[INFO] StreamManager interrupted by user.'
@@ -43,7 +43,8 @@ class Manager:
         wss_url: str,
         database: "Database",
         order_place_file_path: str,
-        strategy_folder_path: str
+        strategy_folder_path: str,
+        response_file_path: str
     ):
         self.enabled_exchange_name = enabled_exchange_name
         self.loaded_exchange_config = loaded_exchange_config
@@ -51,6 +52,7 @@ class Manager:
         self.database = database
         self.order_place_file_path = order_place_file_path
         self.strategy_folder_path = strategy_folder_path
+        self.response_file_path = response_file_path
         self.cumulative_count = 0
         self.cumulative_price = self.ZERO_FLOAT
         self.cumulative_quantity = self.ZERO_FLOAT
@@ -65,7 +67,7 @@ class Manager:
     def run(self):
         retry_count = 0
         stop_running = False
-        print(f"[INFO] StreamManager started for exchange '{self.exchange_name}'")
+        print(f'[INFO] StreamManager started for exchange "{self.exchange_name}"')
 
         if self.order_place_file_exists:
             raise FileExistsError(f"Order place file already exists: {self.order_place_file_path}")
@@ -123,7 +125,11 @@ class Manager:
 
                             if self.total_loop_count % 6 == 0:
                                 self.database.save_changes()
-                                strategy_instance = self.strategy.create_instance(self.database.cursor)
+                                strategy_instance = self.strategy.create_instance(
+                                    database_cursor=self.database.cursor,
+                                    strategy_folder_path=self.strategy_folder_path,
+                                    response_file_path=self.response_file_path
+                                )
                                 strategy_instance.execute()
 
                             self.avg_price = self.cumulative_price / self.cumulative_count
