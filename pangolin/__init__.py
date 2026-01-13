@@ -23,4 +23,6 @@ Modules:
 from .config import Config
 from .database import Database
 from .client import Client
+from .client import BinanceClient
+from .client import ClientFactory
 from .manager import Manager
