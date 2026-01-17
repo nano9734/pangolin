@@ -1,31 +1,32 @@
-"""The main config file for Pangolin
+# SPDX-License-Identifier: GPL-2.0-or-later
 
-Pangolin provides a controlled interface
-to ensure configuration integrity and to prevent
-invalid or unexpected configuration values
-from being applied at runtime.
+"""The main config file for Pangolin
 """
 
 import configparser
-import os
+from pathlib import Path
 
 class Config:
-    def __init__(self, config_file_name: str):
+    LOAD_SUCCESS_MESSAGE = "[INFO] Pangolin configuration file ({}) loaded."
+    FILE_NOT_FOUND_MESSAGE = "[INFO] Configuration file ({}) not found."
+
+    def __init__(self, config_file_name: str, allow_missing: bool):
         self.config_file_name = config_file_name
-        self.config_load_success_message = f"[INFO] Pangolin configuration file ({self.config_file_name}) loaded."
-        self.config_file_not_found_message = f"[INFO] Configuration file ({self.config_file_name}) not found."
+        self.allow_missing = allow_missing
+        self.config_path = Path(config_file_name)
+        self.config = configparser.ConfigParser()
 
-    def load(self, allow_missing: bool) -> configparser.ConfigParser:
-        if not os.path.exists(self.config_file_name):
-            if not allow_missing:
-                raise FileNotFoundError(self.config_file_not_found_message)
+    def load(self) -> configparser.ConfigParser:
+        if not self.config_path.exists():
+            if not self.allow_missing:
+                raise FileNotFoundError(self.FILE_NOT_FOUND_MESSAGE.format(self.config_path))
+            else:
+                print(f"[WARN] Configuration file ({self.config_path}) is missing, proceeding with defaults.")
+        else:
+            self.config.read(self.config_path)
+            print(self.LOAD_SUCCESS_MESSAGE.format(self.config_path))
+            return self.config
 
-        config = configparser.ConfigParser()
-        config.read(self.config_file_name, encoding="utf-8")
-
-        print(self.config_load_success_message + "\n")
-
-        return config
-
-    def print_message(self, message):
+    def display_message(self, message):
+        print() # add a line break for console readability 
         print(message)

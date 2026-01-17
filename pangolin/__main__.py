@@ -55,12 +55,19 @@ class HeaderMessages:
     FACTORY_HEADER = LEFT_SEPARATOR + ClassNames.FACTORY + RIGHT_SEPARATOR
 
 class BinanceHosts:
-    FUTURES_WSS = "fstream.binance.com"
-    FUTURES_REST_API = "fapi.binance.com"
-    TEST_FUTURES_ORDER_URL = "testnet.binancefuture.com"
+    FUTURES_STREAM = "fstream.binance.com" # WebSocket
+    FUTURES_API = "fapi.binance.com"
+    TESTNET_FUTURES_API = "testnet.binancefuture.com"
+
+class BinanceEndpoints:
+    TIME = "/fapi/v1/time"
+    ORDER = "/fapi/v1/order"
 
 class BinanceUrls:
-    TESTNET_FUTURES_TIME = "https://testnet.binancefuture.com/fapi/v1/time"
+    FUTURES_TIME = "https://" + BinanceHosts.FUTURES_API + BinanceEndpoints.TIME
+    TESTNET_FUTURES_TIME = "https://" + BinanceHosts.TESTNET_FUTURES_API + BinanceEndpoints.TIME
+    FUTURES_ORDER = "https://" + BinanceHosts.FUTURES_API + BinanceEndpoints.ORDER
+    TESTNET_FUTURES_ORDER = "https://" + BinanceHosts.TESTNET_FUTURES_API + BinanceEndpoints.ORDER
 
 # Define main function
 def main():
@@ -75,7 +82,6 @@ def main():
     url_factory = UrlFactory()
 
     # Initialize Binance-related variables here so they can be referenced outside of conditional blocks
-    binance_futures_client_url = None
     binance_futures_urls = []
 
     # Initialize client values
@@ -96,20 +102,35 @@ def main():
 
         url_factory.display_message(message=HeaderMessages.FACTORY_HEADER)
 
-        # Create the Binance URLs
-        binance_futures_wss_url = url_factory.create_binance_futures_wss_url(host=BinanceHosts.FUTURES_WSS, ticker=ticker)
-        binance_futures_price_url = url_factory.create_binance_futures_price_url(host=BinanceHosts.FUTURES_REST_API, symbol=symbol)
-        binance_futures_exchange_info_url = url_factory.create_binance_futures_exchange_info_url(host=BinanceHosts.FUTURES_REST_API, symbol=symbol)
+        binance_futures_stream_host = BinanceHosts.FUTURES_STREAM
+        binance_futures_api_host = BinanceHosts.FUTURES_API
+
+        if loaded_config["Binance"]["is_testnet"] == "yes":
+            binance_futures_api_host = BinanceHosts.TESTNET_FUTURES_API
+
+        # Create the Binance URLs using the URL factory
+        binance_futures_wss_url = url_factory.create_binance_futures_wss_url(host=BinanceHosts.FUTURES_STREAM, ticker=ticker)
+        binance_futures_price_url = url_factory.create_binance_futures_price_url(host=binance_futures_api_host, symbol=symbol)
+        binance_futures_exchange_info_url = url_factory.create_binance_futures_exchange_info_url(host=binance_futures_api_host, symbol=symbol)
+
+        # Static URLs defined as constants
+        binance_futures_time_url = BinanceUrls.FUTURES_TIME
+        binance_futures_order_url = BinanceUrls.FUTURES_ORDER
 
         if loaded_config["Binance"]["is_testnet"] == "yes":
             binance_futures_time_url = BinanceUrls.TESTNET_FUTURES_TIME
+            binance_futures_order_url= BinanceUrls.TESTNET_FUTURES_ORDER
+
+        print(f"\n[MAIN] Rest API URL ({binance_futures_time_url}) has been created.")
+        print(f"[MAIN] Rest API URL ({binance_futures_order_url}) has been created.")
 
         # Append Binance future URLs
         for binance_futures_url in [
             binance_futures_wss_url,
             binance_futures_price_url,
             binance_futures_exchange_info_url,
-            binance_futures_time_url
+            binance_futures_time_url,
+            binance_futures_order_url
         ]:
             binance_futures_urls.append(binance_futures_url)
 
@@ -121,16 +142,12 @@ def main():
             client_api_key = loaded_config["Binance"]["api_key"]
             client_api_secret = loaded_config["Binance"]["api_secret"]
 
-        # Overwrite config
-        if loaded_config["Binance"]["is_testnet"] == "yes":
-            binance_futures_client_url = BinanceHosts.TEST_FUTURES_ORDER_URL
-
         tumbling_window_seconds = loaded_config["Binance"]["tumbling_window_seconds"]
         max_display_loop_count = loaded_config["Binance"]["max_display_loop_count"]
         max_total_loop_count = loaded_config["Binance"]["max_total_loop_count"]
 
     # Initialize outside if statement for safe reference later
-    assembled_urls = []
+    required_urls = []
 
     if binance_futures_urls:
         assembled_urls = binance_futures_urls
@@ -158,7 +175,7 @@ def main():
     manager.display_message(message=HeaderMessages.MANAGER_HEADER, use_new_line=True)
     manager.check_file_conflicts()
 
-    if loaded_config["Binance"]["is_enabled"] == "yes" and len(binance_futures_urls) == 4:
+    if loaded_config["Binance"]["is_enabled"] == "yes" and len(binance_futures_urls) == 5:
         print(f'[INFO] Manager started for exchange "{enabled_exchange_name}"')
         manager.run_binance_stream()
 
