@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
+
 """Main entry point for running Pangolin.
 
 Execution:
@@ -8,171 +9,158 @@ Notes:
 - Use Ctrl+C to terminate safely.
 """
 
-import os
-import time
-import schedule
-from urllib.parse import urlparse
-from dataclasses import dataclass
+from pathlib import Path
+
 from pangolin import Config
+from pangolin import UrlFactory
 from pangolin import Client
-from pangolin import BinanceClient
-from pangolin import ClientFactory
-from pangolin import Database
 from pangolin import Manager
 
-@dataclass(frozen=True)
-class FileExtensions:
-    JSON = ".json"
-    INI = ".ini"
-    DATABASE = ".db"
-
-@dataclass(frozen=True)
 class Project:
     NAME = "pangolin"
 
-@dataclass(frozen=True)
+class FileExtensions:
+    INI = ".ini"
+    JSON = ".json"
+
 class FileNames:
+    CONFIG = Project.NAME + FileExtensions.INI
     ORDER_PLACE = "order_place" + FileExtensions.JSON
     RESPONSE = "response" + FileExtensions.JSON
-    CONFIG = Project.NAME + FileExtensions.INI
-    DATABASE = Project.NAME + FileExtensions.DATABASE
 
-@dataclass(frozen=True)
 class DirectoryNames:
     DATA = "data"
     STRATEGY = "strategies"
-    SQL = "sql"
 
-@dataclass(frozen=True)
 class ProjectPaths:
-    STRATEGY = os.path.join(Project.NAME, DirectoryNames.STRATEGY)
-    ORDER_PLACE = os.path.join(Project.NAME, DirectoryNames.DATA, FileNames.ORDER_PLACE)
-    RESPONSE = os.path.join(Project.NAME, DirectoryNames.DATA, FileNames.RESPONSE)
-    SQL = os.path.join(Project.NAME, DirectoryNames.SQL) + os.sep
+    ORDER_PLACE = Path(Project.NAME) / DirectoryNames.DATA / FileNames.ORDER_PLACE
+    RESPONSE = Path(Project.NAME) / DirectoryNames.DATA / FileNames.RESPONSE
+    STRATEGY = Path(Project.NAME) / DirectoryNames.STRATEGY
 
-@dataclass(frozen=True)
 class ExchangesNames:
     BINANCE = "binance"
 
-@dataclass(frozen=True)
 class ClassNames:
-    CONFIG = "Config"
     CLIENT = "Client"
-    DATABASE = "Database"
+    CONFIG = "Config"
     MANAGER = "Manager"
+    FACTORY = "UrlFactory"
 
-@dataclass(frozen=True)
-class Messages:
+class HeaderMessages:
     LEFT_SEPARATOR = "*** "
     RIGHT_SEPARATOR = " ***"
-    CONFIG_HEADER = LEFT_SEPARATOR + ClassNames.CONFIG + RIGHT_SEPARATOR
     CLIENT_HEADER = LEFT_SEPARATOR + ClassNames.CLIENT + RIGHT_SEPARATOR
-    DATABASE_HEADER = LEFT_SEPARATOR + ClassNames.DATABASE + RIGHT_SEPARATOR
+    CONFIG_HEADER = LEFT_SEPARATOR + ClassNames.CONFIG + RIGHT_SEPARATOR
     MANAGER_HEADER = LEFT_SEPARATOR + ClassNames.MANAGER + RIGHT_SEPARATOR
+    FACTORY_HEADER = LEFT_SEPARATOR + ClassNames.FACTORY + RIGHT_SEPARATOR
 
-@dataclass(frozen=True)
-class DatabaseTable:
-    NAME = "stocks"
+class BinanceHosts:
+    FUTURES_WSS = "fstream.binance.com"
+    FUTURES_REST_API = "fapi.binance.com"
+    TEST_FUTURES_ORDER_URL = "testnet.binancefuture.com"
 
-@dataclass(frozen=True)
-class Binance:
-    FUTURES_WSS_URL = "wss://fstream.binance.com"
+class BinanceUrls:
+    TESTNET_FUTURES_TIME = "https://testnet.binancefuture.com/fapi/v1/time"
 
-class UrlFactory:
-    @staticmethod
-    def create_binance_wss_url(enabled_exchange_name:str, net_loc: str, ticker: str) -> str:
-        wss_url = 'wss://' + net_loc + '/ws/' + ticker + '@aggTrade'
-        print(f'[UrlFactory] WebSocket URL ({wss_url}) has been assembled.')
-        print() # add a line break for console readability
-        return wss_url
-
+# Define main function
 def main():
-    config = Config(config_file_name=FileNames.CONFIG)
-    config.print_message(Messages.CONFIG_HEADER)
-    loaded_exchange_config = config.load(allow_missing=False)
-    file_check = FileCheck()
+    config = Config(
+        config_file_name=FileNames.CONFIG,
+        allow_missing=False
+    )
 
-    if binance_enabled(loaded_exchange_config=loaded_exchange_config):
+    config.display_message(message=HeaderMessages.CONFIG_HEADER)
+    loaded_config = config.load()
+
+    url_factory = UrlFactory()
+
+    # Initialize Binance-related variables here so they can be referenced outside of conditional blocks
+    binance_futures_client_url = None
+    binance_futures_urls = []
+
+    # Initialize client values
+    client_symbol = None
+    client_url = None
+    client_api_key = None
+    client_secret_key = None
+
+    if loaded_config["Binance"]["is_enabled"] == "yes":
         # Set the enabled exchange
-        enabled_exchange_name = ExchangesNames.BINANCE
+        enabled_exchange_name = ExchangesNames.BINANCE.capitalize()
 
-        # Retrieve Binance configuration
-        binance_config = loaded_exchange_config[enabled_exchange_name.capitalize()]
+        # BinancE API endpoint: https://fapi.binance.com/fapi/v1/ticker/price
+        # The ticker symbol, such as "btcusdt", can be verified at this endpoint.
+        ticker = loaded_config["Binance"]['supported_coin'].lower() + 'usdt'
+        symbol = ticker.upper()
+        client_symbol = symbol
 
-        # Extract the network location (net_loc) from the URL
-        # The term "net_loc" was used in RFC 1808 but is now deprecated
-        # Reference: https://datatracker.ietf.org/doc
-        net_loc = urlparse(Binance.FUTURES_WSS_URL).netloc
+        url_factory.display_message(message=HeaderMessages.FACTORY_HEADER)
 
-        # Binance API endpoint: https://fapi.binance.com/fapi/v1/ticker/price
-        # The ticker symbol, such as "btcusdt", can be verified at this endpoint
-        ticker = binance_config['supported_coin'].lower() + 'usdt'
+        # Create the Binance URLs
+        binance_futures_wss_url = url_factory.create_binance_futures_wss_url(host=BinanceHosts.FUTURES_WSS, ticker=ticker)
+        binance_futures_price_url = url_factory.create_binance_futures_price_url(host=BinanceHosts.FUTURES_REST_API, symbol=symbol)
+        binance_futures_exchange_info_url = url_factory.create_binance_futures_exchange_info_url(host=BinanceHosts.FUTURES_REST_API, symbol=symbol)
 
-        # Create the Binance WebSocket URL
-        wss_url = UrlFactory.create_binance_wss_url(enabled_exchange_name=enabled_exchange_name, net_loc=net_loc, ticker=ticker)
+        if loaded_config["Binance"]["is_testnet"] == "yes":
+            binance_futures_time_url = BinanceUrls.TESTNET_FUTURES_TIME
 
-    client = ClientFactory.create_client(
-        enabled_exchange_name=enabled_exchange_name,
-        config=binance_config,
+        # Append Binance future URLs
+        for binance_futures_url in [
+            binance_futures_wss_url,
+            binance_futures_price_url,
+            binance_futures_exchange_info_url,
+            binance_futures_time_url
+        ]:
+            binance_futures_urls.append(binance_futures_url)
+
+        # Binance API keys
+        if loaded_config["Binance"]["is_testnet"] == "yes":
+            client_api_key = loaded_config["Binance"]["test_api_key"]
+            client_api_secret = loaded_config["Binance"]["test_api_secret"]
+        elif loaded_config["Binance"]["is_testnet"] == "no":
+            client_api_key = loaded_config["Binance"]["api_key"]
+            client_api_secret = loaded_config["Binance"]["api_secret"]
+
+        # Overwrite config
+        if loaded_config["Binance"]["is_testnet"] == "yes":
+            binance_futures_client_url = BinanceHosts.TEST_FUTURES_ORDER_URL
+
+        tumbling_window_seconds = loaded_config["Binance"]["tumbling_window_seconds"]
+        max_display_loop_count = loaded_config["Binance"]["max_display_loop_count"]
+        max_total_loop_count = loaded_config["Binance"]["max_total_loop_count"]
+
+    # Initialize outside if statement for safe reference later
+    assembled_urls = []
+
+    if binance_futures_urls:
+        assembled_urls = binance_futures_urls
+
+    client = Client(
+        client_symbol=client_symbol,
+        assembled_urls=assembled_urls,
+        client_api_key=client_api_key,
+        client_api_secret=client_api_secret,
         order_place_file_path=ProjectPaths.ORDER_PLACE,
         response_file_path=ProjectPaths.RESPONSE
     )
 
-    client.print_message(Messages.CLIENT_HEADER)
-
-    #client.place_order(symbol='BTCUSDT', side='SELL', trade_type='MARKET', quantity=0.02)
-
-    print(Messages.DATABASE_HEADER)
-    database = Database(
-        sql_path = ProjectPaths.SQL,
-        enabled_exchange_name=enabled_exchange_name,
-        database_file_name=FileNames.DATABASE,
-        database_table_name=DatabaseTable.NAME
-    )
-
-    if database.database_file_exists:
-        database.delete_database_file()
-
-    database.connect()
-    database.create_table()
-    print() # add a line break for console readability
-
-    print(Messages.MANAGER_HEADER)
     manager = Manager(
-        enabled_exchange_name=enabled_exchange_name,
-        loaded_exchange_config=loaded_exchange_config,
-        wss_url=wss_url,
-        database=database,
-        order_place_file_path=ProjectPaths.ORDER_PLACE,
+        client = client,
         strategy_folder_path=ProjectPaths.STRATEGY,
-        response_file_path=ProjectPaths.RESPONSE
+        order_place_file_path=ProjectPaths.ORDER_PLACE,
+        response_file_path=ProjectPaths.RESPONSE,
+        assembled_urls=assembled_urls,
+        tumbling_window_seconds=tumbling_window_seconds,
+        max_display_loop_count=max_display_loop_count,
+        max_total_loop_count=max_total_loop_count
     )
 
-    if not file_check.order_place_file_exists and not file_check.response_file_exists:
-        manager.run()
+    manager.display_message(message=HeaderMessages.MANAGER_HEADER, use_new_line=True)
+    manager.check_file_conflicts()
 
-        if file_check.order_place_file_exists and file_check.response_file_exists:
-            schedule.every(10).seconds.do(job)
-            while True:
-                schedule.run_pending()
-                time.sleep(1)
-    else:
-        raise FileExistsError(f'[ERROR] The file(s) "{ProjectPaths.ORDER_PLACE}" or "{ProjectPaths.RESPONSE}" already existed at the start.')
-
-def job():
-    print("test job")
-
-def binance_enabled(loaded_exchange_config):
-    return loaded_exchange_config['Binance'].getboolean('is_enabled')
-
-class FileCheck:
-    @property
-    def order_place_file_exists(self) -> bool:
-        return os.path.exists(ProjectPaths.ORDER_PLACE)
-
-    @property
-    def response_file_exists(self) -> bool:
-        return os.path.exists(ProjectPaths.RESPONSE)
+    if loaded_config["Binance"]["is_enabled"] == "yes" and len(binance_futures_urls) == 4:
+        print(f'[INFO] Manager started for exchange "{enabled_exchange_name}"')
+        manager.run_binance_stream()
 
 if __name__ == '__main__':
     main()
