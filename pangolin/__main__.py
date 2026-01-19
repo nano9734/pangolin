@@ -18,15 +18,12 @@ from pangolin import Manager
 
 # Define main function
 def main():
-    config = Config(
-        config_file_name=FileNames.CONFIG,
-        allow_missing=False
-    )
-
+    # Load config
+    config = Config(config_file_name=FileNames.CONFIG, allow_missing=False)
     print(HeaderMessages.CONFIG_HEADER + "\n")
-
     loaded_config = config.load()
 
+    # Initialize URL factory
     url_factory = UrlFactory()
 
     # Binance futures URLs constructed at runtime
@@ -36,7 +33,7 @@ def main():
     # Active configuration values
     active_symbol = None
     active_api_key = None
-    active_secret_key = None
+    active_api_secret = None
 
     # Binance Futures hosts
     binance_futures_stream_host = None
@@ -91,9 +88,6 @@ def main():
         print(f"[MAIN] Rest API URL ({binance_futures_time_url}) has been created.")
         print(f"[MAIN] Rest API URL ({binance_futures_order_url}) has been created.")
 
-        binance_futures_created_urls = []
-        binance_futures_assembled_urls = []
-
         for binance_futures_assembled_url in [binance_futures_wss_url, binance_futures_price_url, binance_futures_exchange_info_url]:
             binance_futures_assembled_urls.append(binance_futures_assembled_url)
 
@@ -134,8 +128,8 @@ def main():
         client=client,
         combined_urls=combined_urls,
         tumbling_window_seconds=tumbling_window_seconds,
-        max_display_loop_count=max_display_loop_count,
         max_total_loop_count=max_total_loop_count,
+        max_display_loop_count=max_display_loop_count,
         strategy_folder_path=ProjectPaths.STRATEGY,
         response_file_path=ProjectPaths.RESPONSE
     )
