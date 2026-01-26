@@ -1,8 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-"""The main config file for Pangolin
-"""
-
 import configparser
 from pathlib import Path
 
@@ -16,7 +13,7 @@ class Config:
         self.config_path = Path(config_file_name)
         self.config = configparser.ConfigParser()
 
-    def load(self) -> configparser.ConfigParser:
+    def loads(self) -> configparser.ConfigParser:
         if not self.config_path.exists():
             if not self.allow_missing:
                 raise FileNotFoundError(self.FILE_NOT_FOUND_MESSAGE.format(self.config_path))
